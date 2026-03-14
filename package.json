@@ -1,6 +1,6 @@
 {
   "name": "pi-telebridge",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "A pi extension that creates a two-way relay between your active pi coding agent session and a Telegram bot.",
   "type": "module",
   "keywords": [

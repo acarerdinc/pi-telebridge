@@ -175,43 +175,12 @@ export default function (pi: ExtensionAPI) {
 	// ── Session Events ──────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
-		// Always stop any lingering bot from a previous session
+		// Always stop any lingering bot and reset state
 		await stopBot();
-
-		// Restore relay state from session entries
 		relayEnabled = false;
 		lastMessageFromTelegram = false;
-		for (const entry of ctx.sessionManager.getEntries()) {
-			if (entry.type === "custom" && entry.customType === "telebridge-state") {
-				const data = (entry as { data?: { enabled?: boolean } }).data;
-				relayEnabled = data?.enabled ?? false;
-			}
-		}
-
-		// If relay was enabled, try to reconnect the bot
-		if (relayEnabled) {
-			botToken = resolveToken();
-			chatId = resolveChatId();
-
-			if (botToken && chatId) {
-				try {
-					await startBot(botToken);
-					setAllowedChatId(chatId);
-					wireIncomingHandler(ctx);
-
-					if (ctx.hasUI) {
-						const theme = ctx.ui.theme;
-						ctx.ui.setStatus("telebridge", theme.fg("success", "📡 TG"));
-					}
-				} catch {
-					relayEnabled = false;
-					if (ctx.hasUI) {
-						ctx.ui.notify("⚠️ Telebridge: failed to reconnect bot", "warning");
-					}
-				}
-			} else {
-				relayEnabled = false;
-			}
+		if (ctx.hasUI) {
+			ctx.ui.setStatus("telebridge", undefined);
 		}
 	});
 
