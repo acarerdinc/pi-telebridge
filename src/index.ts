@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { loadConfig, saveConfig, resolveToken, resolveChatId } from "./config.js";
-import { startBot, stopBot, getBot, setAllowedChatId, setIncomingMessageHandler, waitForChatId, sendText, sendTyping } from "./bot.js";
+import { startBot, stopBot, getBot, setAllowedChatId, setIncomingMessageHandler, setIncomingVoiceHandler, waitForChatId, sendText, sendTyping } from "./bot.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./formatter.js";
 
 const TELEGRAM_BRIEF_INSTRUCTION = [
@@ -79,6 +79,27 @@ export default function (pi: ExtensionAPI) {
 
 			// Mark as Telegram-originated and send to agent
 			lastMessageFromTelegram = true;
+			if (ctx.isIdle()) {
+				pi.sendUserMessage(text);
+			} else {
+				pi.sendUserMessage(text, { deliverAs: "followUp" });
+			}
+		});
+
+		setIncomingVoiceHandler((_incomingChatId, filePath, duration) => {
+			if (!relayEnabled) {
+				sendText(_incomingChatId, "⚠️ Relay is disabled. Enable with /telegram in pi.");
+				return;
+			}
+
+			// Notify in TUI
+			if (ctx.hasUI) {
+				ctx.ui.notify(`🎤 Telegram: voice message (${duration}s) saved to ${filePath}`, "info");
+			}
+
+			// Forward as user message so the agent can transcribe it
+			lastMessageFromTelegram = true;
+			const text = `[Voice message received: ${filePath}]`;
 			if (ctx.isIdle()) {
 				pi.sendUserMessage(text);
 			} else {

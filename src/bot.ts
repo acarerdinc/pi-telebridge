@@ -8,10 +8,20 @@ let botInstance: Bot | null = null;
 let currentToken: string | null = null;
 
 export type IncomingMessageHandler = (chatId: number, text: string) => void;
+export type IncomingVoiceHandler = (chatId: number, filePath: string, duration: number) => void;
 
 let onIncomingMessage: IncomingMessageHandler | null = null;
+let onIncomingVoice: IncomingVoiceHandler | null = null;
 let allowedChatId: number | null = null;
 let chatIdDiscoveryResolve: ((chatId: number) => void) | null = null;
+
+// ── Voice message storage ───────────────────────────────────
+
+const VOICE_DIR = path.join(os.homedir(), ".pi", "agent", "voice_messages");
+
+function ensureVoiceDir(): void {
+	try { fs.mkdirSync(VOICE_DIR, { recursive: true }); } catch {}
+}
 
 // ── Lock file for cross-process coordination ────────────────
 
@@ -101,6 +111,56 @@ export async function startBot(token: string): Promise<Bot> {
 		}
 	});
 
+	// Handle voice/audio/video_note messages
+	bot.on(["message:voice", "message:audio", "message:video_note"], async (ctx) => {
+		const chatId = ctx.chat.id;
+
+		// Chat ID discovery mode
+		if (chatIdDiscoveryResolve) {
+			chatIdDiscoveryResolve(chatId);
+			chatIdDiscoveryResolve = null;
+			return;
+		}
+
+		if (allowedChatId !== null && chatId !== allowedChatId) return;
+
+		try {
+			const media = ctx.message.voice || ctx.message.audio || ctx.message.video_note;
+			if (!media) return;
+
+			const file = await ctx.api.getFile(media.file_id);
+			const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+
+			const resp = await fetch(fileUrl);
+			const buffer = Buffer.from(await resp.arrayBuffer());
+
+			ensureVoiceDir();
+			const ext = path.extname(file.file_path || "") || ".ogg";
+			const filename = `voice_${Date.now()}${ext}`;
+			const filepath = path.join(VOICE_DIR, filename);
+			fs.writeFileSync(filepath, buffer);
+
+			// Write metadata for latest voice message
+			const meta = {
+				file: filepath,
+				date: ctx.message.date,
+				duration: media.duration || 0,
+				chatId,
+				timestamp: Date.now(),
+			};
+			fs.writeFileSync(path.join(VOICE_DIR, "latest.json"), JSON.stringify(meta, null, 2));
+
+			// Notify via voice handler or fall back to text handler
+			if (onIncomingVoice) {
+				onIncomingVoice(chatId, filepath, media.duration || 0);
+			} else if (onIncomingMessage) {
+				onIncomingMessage(chatId, `[Voice message received: ${filepath}]`);
+			}
+		} catch (err: any) {
+			console.error("[telebridge] Voice download error:", err.message);
+		}
+	});
+
 	// Handle errors — detect 409 Conflict (another poller took over)
 	bot.catch((err) => {
 		const msg = err.message || "";
@@ -171,6 +231,10 @@ export function setAllowedChatId(chatId: number | null): void {
 
 export function setIncomingMessageHandler(handler: IncomingMessageHandler | null): void {
 	onIncomingMessage = handler;
+}
+
+export function setIncomingVoiceHandler(handler: IncomingVoiceHandler | null): void {
+	onIncomingVoice = handler;
 }
 
 /**
